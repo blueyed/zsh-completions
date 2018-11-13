@@ -1,5 +1,11 @@
 #compdef pytest py.test
 
+# Features:
+#
+# - completes tags (via Zsh's _complete_tag) for `-k`
+#   TODO: complete tags of file after `pytest test_foo.py::`.
+#   TODO: only return class/function ctag kinds.
+
 local ret=1
 
 local context state state_descr line
@@ -7,16 +13,26 @@ typeset -A opt_args
 
 
 _pytest_caching_policy () {
-  # rebuild if cache is more than a week old
-  local -a oldp
-  oldp=( "$1"(Nm+7) )
-  (( $#oldp ))
+  local ret  # 0 means that the cache needs to be rebuilt.
+
+  # Compare cache file's timestamp to the most recently modified sys.path entry.
+  # This gets changed/touched when installing/removing packages.
+  local newest_sys_path=$(python -c '
+import sys
+from os.path import exists, getmtime
+print(sorted(sys.path, key=lambda x: exists(x) and getmtime(x))[-1])')
+  if [[ $newest_sys_path -nt $1 ]]; then
+    # Gets overwritten by later message ("Querying...")
+    # zle -M "Newest sys.path entry is older than $1 - rebuilding cache.."
+    return 0
+  fi
+  return 1
 }
 
 local -a pytest_options
 _pytest_options() {
-  # this function calls py.test and loops over the list of apps and options
-  # and constructs the help menu with it
+  # This function calls pytest and loops over the list of apps and options
+  # and constructs the help menu with it.
 
   local cache_policy
   zstyle -s ":completion:${curcontext}:" cache-policy cache_policy
@@ -25,7 +41,7 @@ _pytest_options() {
   fi
 
   if _cache_invalid pytest_options || ! _retrieve_cache pytest_options; then
-    zle -M "Querying pytest options..."
+    zle -M 'Querying pytest options...'
 
     # TODO:
     # - start sections with '^reporting:' etc.
@@ -34,7 +50,7 @@ _pytest_options() {
     local _words opts i desc
     local opt
     local in_desc
-    _call_program commands py.test --help | while IFS='' read line; do
+    _call_program commands pytest --help | while IFS='' read line; do
       # add dashed options for completion only
       if [[ $line[1,3] == '  -' ]] || [[ -z "$line" ]]; then
 
@@ -95,6 +111,7 @@ _pytest_options() {
           break
         fi
       done
+      zle -M ''
     done
     pytest_options+=('-k[only run tests matching the substring expression]:tag:_complete_tag')
     _store_cache pytest_options pytest_options
@@ -104,9 +121,7 @@ _pytest_options() {
 _pytest_options
 
 _arguments -C \
-  ':file:_files' \
-  $pytest_options \
-  '*::options:->options' && ret=0
-  _pytest_options
+  '*:file:_files' \
+  $pytest_options && ret=0
 
 return $ret
